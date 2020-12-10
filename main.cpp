@@ -8,6 +8,7 @@
 #include "geometry.h"
 #include "model.h"
 
+float fog_density = 1;
 Model::Model(const char *filename) : verts(), faces() {
     std::ifstream in;
     in.open (filename, std::ifstream::in);
@@ -24,6 +25,8 @@ Model::Model(const char *filename) : verts(), faces() {
             iss >> trash;
             Vec3f v;
             for (int i=0;i<3;i++) iss >> v[i];
+            Vec3f off(-12.5, 0, -8.5);
+            v = v + off;
             verts.push_back(v);
         } else if (!line.compare(0, 2, "f ")) {
             Vec3i f;
@@ -113,7 +116,8 @@ std::ostream& operator<<(std::ostream& out, Model &m) {
 
 
 Model duck("/home/nastya/graphics/test/duck.obj");
-Model triangle("/home/nastya/graphics/test/triangle.obj");
+//Model triangle("/home/nastya/graphics/test/triangle.obj");
+Model triangle("/home/nastya/graphics/test/lowpolytree.obj");
 
 
 class Light {
@@ -151,6 +155,28 @@ Vec3f refract(const Vec3f &I, const Vec3f &N, const float n_second, const float 
         return I*n_rel + N*(n_rel*cos_inc - sqrtf(rad));
     }
 }
+
+class Sphere1 {
+public:
+    Vec3f center;
+    float sphere_radius;
+
+    Sphere1(Vec3f cen, float rad) : center(cen), sphere_radius(rad) {}
+    float signed_distance(const Vec3f &p) {
+        Vec3f p_copy = p;
+        return p_copy.norm() - sphere_radius;
+    }
+    bool sphere_trace(const Vec3f &orig, const Vec3f &dir, Vec3f &pos) {
+        pos = orig;
+        for (size_t i=0; i<128; i++) {
+            float d = signed_distance(pos);
+            if (d < 0) return true;
+            pos = pos + dir*std::max(d*0.1f, .01f);
+        }
+        return false;
+    }
+};
+Sphere1 test(Vec3f(-1, -1.5, -12), 2);
 
 class Sphere {
 public:
@@ -198,6 +224,7 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
         if ((*q).ray_intersect(orig, dir, dist_iter) && dist_iter < spheres_dist) {
             spheres_dist = dist_iter;
             hit = orig + dir*dist_iter;
+
             N = (hit - (*q).center).normalize();
             material = (*q).material;
             num = i;
@@ -207,15 +234,24 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
     }
     //return spheres_dist < 1000;
 
+    /*float spheres_dist1 = std::numeric_limits<float>::max();
+    float dist_iter = 0;
+    Vec3f hit1;
+    if (test.sphere_trace(orig, dir, hit1)) {
+        spheres_dist1 = (hit-orig).norm();
+        N = (hit - test.center).normalize();
+    }*/
+
     float checkerboard_dist = std::numeric_limits<float>::max();
     if (fabs(dir.y) > 1e-3) { //проверяем чтобы не делить на ноль
         float d = -(orig.y+4)/dir.y; // доска находится в плоскости y = -4
         Vec3f pt = orig + dir*d;
-        if (d>0 && fabs(pt.x)<10 && pt.z<-10 && pt.z>-30 && d<spheres_dist) {
+        if (d>0 && fabs(pt.x)<40 && pt.z<-10 && pt.z>-200 && d<spheres_dist) {
             checkerboard_dist = d;
             hit = pt; //точка пересечения луча с доской
             N = Vec3f(0,1,0); //нормаль
-            material.diffuse_color = (int(.5*hit.x+1000) + int(.5*hit.z)) & 1 ? Vec3f(.3, .3, .3) : Vec3f(.3, .2, .1);
+            material.diffuse_color = (int(.5*hit.x+1000) + int(.5*hit.z)) & 1 ? Vec3f(.3, .3, .3) : Vec3f(.06, .04, .0);
+            //material = Material(1.0, Vec4f(0.6,  0.3, 0.1, 0.0), Vec3f(0.4, 0.4, 0.3),   50.);
         }
     }
     /*float triangles_dist = std::numeric_limits<float>::max();
@@ -228,12 +264,12 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
             Vec3f v1 = triangle.point(triangle.vert(i, 1));
             Vec3f v2 = triangle.point(triangle.vert(i, 2));
             N = cross(v1-v0, v2-v0).normalize();
-            material = Material(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.3, 0.1, 0.1),   10.);
             //material = Material(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.3, 0.1, 0.1),   10.);
+            material = Material(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.3, 0.1, 0.1),   10.);
         }
     }*/
     float triangles_dist = std::numeric_limits<float>::max();
-    for (int i = 0; i < duck.nfaces(); i++) {
+    /*for (int i = 0; i < duck.nfaces(); i++) {
         float dist_iter;
         if (duck.ray_triangle_intersect(i, orig, dir, dist_iter) && dist_iter < triangles_dist && dist_iter < spheres_dist) {
             triangles_dist = dist_iter;
@@ -242,9 +278,11 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
             Vec3f v1 = duck.point(duck.vert(i, 1));
             Vec3f v2 = duck.point(duck.vert(i, 2));
             N = cross(v1-v0, v2-v0).normalize();
-            material = Material(1.5, Vec4f(0.3,  1.5, 0.2, 0.5), Vec3f(.24, .21, .09),  125.);
+            material = Material(1.0, Vec4f(0.6,  0.3, 0.1, 0.0), Vec3f(1.0, 0.8, 0.02),   50.);
+            //material = Material(1.0, Vec4f(0.8,  0.2, 0.1, 0.0), Vec3f(1.0, 0.8, 0.02),   10.);
+            //material = Material(1.5, Vec4f(0.3,  1.5, 0.2, 0.5), Vec3f(.24, .21, .09),  125.);
         }
-    }
+    }*/
 
     /*if (num == 1) {
         float displacement = (sin(10*hit.x)*sin(10*hit.y)*sin(10*hit.z))*10;
@@ -253,6 +291,7 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
     } else {*/
         //float cur_min = std::min(triangles_dist, spheres_dist);
         return std::min(triangles_dist, std::min(spheres_dist, checkerboard_dist))<1000;
+        //return std::min(spheres_dist, checkerboard_dist)<1000;
     //}
 
 }
@@ -260,11 +299,13 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
 Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &spheres, const std::vector<Light> &lights, size_t depth=0) {
     Vec3f point, N;
     Material material;
-    int num;
-    if (depth > 2 || !scene_intersect(orig, dir, spheres, point, N, material, num)) { //глубину рекурсии задаем здесь
-        return Vec3f(0.12, 0.11, 0.37); // цвет фона
+    int num = 0;
+    if (depth > 4 || !scene_intersect(orig, dir, spheres, point, N, material, num)) { //глубину рекурсии задаем здесь
+        return Vec3f(0.98, 0.98, 0.98);
+        //return Vec3f(0.12, 0.11, 0.37); // цвет фона
         //return Vec3f(0.1, 0.1, 0.1); // цвет фона
     }
+    float z_dist = orig[2]-point[2];
 
     Vec3f reflect_dir = reflect(dir, N).normalize();
     Vec3f refract_dir = refract(dir, N, material.refractive_index).normalize();
@@ -301,16 +342,28 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
         specular_light_intensity += powf(std::max(0.f, reflect(light_dir, N)*dir), material.specular_exponent)*(*q).intensity; //отсвет обратно пропорционален углу между направлением взгляда и направлением отраженного свет
         ++q;
     }
+
     Vec3f diff_part = material.diffuse_color * diffuse_light_intensity * material.albedo[0];
     Vec3f spec_part = Vec3f(1.0, 1.0, 1.0) * specular_light_intensity * material.albedo[1];
     Vec3f reflect_part = reflect_color * material.albedo[2];
     Vec3f refract_part = refract_color * material.albedo[3];
+
+    float fog_intensity = fog_density * z_dist / 60;
+    Vec3f fog_color(1.0, 1.0, 1.0);
+    Vec3f object_color(diff_part + spec_part + reflect_part + refract_part);
+    object_color[0] *= (1-fog_intensity);
+    object_color[1] *= (1-fog_intensity);
+    object_color[2] *= (1-fog_intensity);
+    fog_color[0] *=fog_intensity;
+    fog_color[1] *=fog_intensity;
+    fog_color[2] *=fog_intensity;
+
     //return diff_part + spec_part + reflect_part + refract_part;
     /*if (num == 1) {
         float displacement = (sin(10*point.x)*sin(10*point.y)*sin(10*point.z) + 1.)/2.0;
         return (diff_part + spec_part + reflect_part + refract_part)*displacement;
     } else {*/
-        return (diff_part + spec_part + reflect_part + refract_part);
+        return object_color + fog_color;
     //}
 
 }
@@ -328,7 +381,7 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
             float dir_x =  (i + 0.5) -  width/2.;
             float dir_y = -(j + 0.5) + height/2.;    // this flips the image at the same time
             float dir_z = -height/(2.*tan(fov/2.));
-            framebuffer[i+j*width] = cast_ray(Vec3f(0,0,0), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
+            framebuffer[i+j*width] = cast_ray(Vec3f(0,0,10), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
         }
     }
 
@@ -355,12 +408,15 @@ int main() {
     Material      glass(1.5, Vec4f(0.0,  0.5, 0.1, 0.8), Vec3f(0.6, 0.7, 0.8),  125.);
     Material red(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.3, 0.1, 0.1),   10.);
     Material     mirror(1.0, Vec4f(0.0, 10.0, 0.8, 0.0), Vec3f(1.0, 1.0, 1.0), 1425.);
-    //Material      black(1.0, Vec4f(0.6,  0.3, 0.1, 0.0), Vec3f(0.1, 0.1, 0.1),   50.);
+    Material ivory_wall(1.0, Vec4f(0.6,  0.3, 0.0, 0.0), Vec3f(0.94, 0.88, 0.69),   30.);
+    Material red_wall(1.0, Vec4f(0.6,  0.3, 0.0, 0.0), Vec3f(0.97, 0.08, 0.29),   30.);
     std::vector<Sphere> spheres;
-    spheres.push_back(Sphere(Vec3f(-3, 0, -16), 2, ivory));
+    //spheres.push_back(Sphere(Vec3f(-3, 0, -16), 2, ivory));
     spheres.push_back(Sphere(Vec3f(-1, -1.5, -12), 2, glass));
-    spheres.push_back(Sphere(Vec3f(1.5, -0.5, -18), 2, red));
+    spheres.push_back(Sphere(Vec3f(1.5, -0.5, -30), 2, red));
     spheres.push_back(Sphere(Vec3f(7, 5, -18), 4, mirror));
+    //spheres.push_back(Sphere(Vec3f(0, -1028, 0), 1000, ivory_wall));
+    //spheres.push_back(Sphere(Vec3f(-1010, 0, 0), 1000, red_wall));
     //Vec3f li(-4, -1.5, -12);
     //spheres.push_back(Sphere(li, 0.1, glass));
 
