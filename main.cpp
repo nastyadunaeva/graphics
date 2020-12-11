@@ -8,7 +8,7 @@
 #include "geometry.h"
 #include "model.h"
 
-float fog_density = 1;
+float fog_density = 0.94;
 Model::Model(const char *filename) : verts(), faces() {
     std::ifstream in;
     in.open (filename, std::ifstream::in);
@@ -348,7 +348,8 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
     Vec3f reflect_part = reflect_color * material.albedo[2];
     Vec3f refract_part = refract_color * material.albedo[3];
 
-    float fog_intensity = fog_density * z_dist / 60;
+    //float fog_intensity = fog_density * z_dist / 60;
+    float fog_intensity = fog_density * (1-exp(-z_dist/20));
     Vec3f fog_color(1.0, 1.0, 1.0);
     Vec3f object_color(diff_part + spec_part + reflect_part + refract_part);
     object_color[0] *= (1-fog_intensity);
@@ -381,7 +382,7 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
             float dir_x =  (i + 0.5) -  width/2.;
             float dir_y = -(j + 0.5) + height/2.;    // this flips the image at the same time
             float dir_z = -height/(2.*tan(fov/2.));
-            framebuffer[i+j*width] = cast_ray(Vec3f(0,0,10), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
+            framebuffer[i+j*width] = cast_ray(Vec3f(0,0,5), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
         }
     }
 
