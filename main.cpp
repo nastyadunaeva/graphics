@@ -8,7 +8,7 @@
 #include "geometry.h"
 #include "model.h"
 
-float fog_density = 0.94;
+float fog_density = 0.93;
 Model::Model(const char *filename) : verts(), faces() {
     std::ifstream in;
     in.open (filename, std::ifstream::in);
@@ -25,7 +25,7 @@ Model::Model(const char *filename) : verts(), faces() {
             iss >> trash;
             Vec3f v;
             for (int i=0;i<3;i++) iss >> v[i];
-            Vec3f off(-12.5, 0, -8.5);
+            Vec3f off(-14, 0, -8.5);
             v = v + off;
             verts.push_back(v);
         } else if (!line.compare(0, 2, "f ")) {
@@ -133,9 +133,10 @@ public:
     Vec4f albedo;
     Vec3f diffuse_color;
     float specular_exponent;
+    float bump_map;
 
-    Material(): refractive_index(1), albedo(1,0,0,0), diffuse_color(), specular_exponent() {}
-    Material(const float r, const Vec4f &al, const Vec3f &color, const float spec): refractive_index(r), albedo(al), diffuse_color(color), specular_exponent(spec) {}
+    Material(): refractive_index(1), albedo(1,0,0,0), diffuse_color(), specular_exponent(), bump_map(0.0) {}
+    Material(const float r, const Vec4f &al, const Vec3f &color, const float spec, const float &bm): refractive_index(r), albedo(al), diffuse_color(color), specular_exponent(spec), bump_map(bm) {}
 };
 
 Vec3f reflect(const Vec3f &I, const Vec3f &N) {
@@ -224,9 +225,16 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
         if ((*q).ray_intersect(orig, dir, dist_iter) && dist_iter < spheres_dist) {
             spheres_dist = dist_iter;
             hit = orig + dir*dist_iter;
-
             N = (hit - (*q).center).normalize();
             material = (*q).material;
+            if (material.bump_map > 1e-3) {
+                float random_bias_x = (float(rand()) / RAND_MAX * 2 - 1) * material.bump_map;
+                float random_bias_y = (float(rand()) / RAND_MAX * 2 - 1) * material.bump_map;
+                float random_bias_z = (float(rand()) / RAND_MAX * 2 - 1) * material.bump_map;
+                //std::cout << random_bias_x << std::endl << random_bias_y << std::endl << random_bias_z << std::endl;
+                Vec3f bias(random_bias_x, random_bias_y, random_bias_z);
+                N = (N + bias).normalize();
+            }
             num = i;
         }
         ++q;
@@ -244,9 +252,9 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
 
     float checkerboard_dist = std::numeric_limits<float>::max();
     if (fabs(dir.y) > 1e-3) { //проверяем чтобы не делить на ноль
-        float d = -(orig.y+4)/dir.y; // доска находится в плоскости y = -4
+        float d = -(orig.y+5.5)/dir.y; // доска находится в плоскости y = -4
         Vec3f pt = orig + dir*d;
-        if (d>0 && fabs(pt.x)<40 && pt.z<-10 && pt.z>-200 && d<spheres_dist) {
+        if (d>0 && fabs(pt.x)<40 && pt.z<-5 && pt.z>-200 && d<spheres_dist) {
             checkerboard_dist = d;
             hit = pt; //точка пересечения луча с доской
             N = Vec3f(0,1,0); //нормаль
@@ -278,9 +286,10 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
             Vec3f v1 = duck.point(duck.vert(i, 1));
             Vec3f v2 = duck.point(duck.vert(i, 2));
             N = cross(v1-v0, v2-v0).normalize();
-            material = Material(1.0, Vec4f(0.6,  0.3, 0.1, 0.0), Vec3f(1.0, 0.8, 0.02),   50.);
+            //material = Material(1.0, Vec4f(0.6,  0.3, 0.1, 0.0), Vec3f(1.0, 0.8, 0.02), 50., 0.0);
+            //material = Material(1.0, Vec4f(0.6,  0.3, 0.1, 0.0), Vec3f(1.0, 0.8, 0.02),   50.);
             //material = Material(1.0, Vec4f(0.8,  0.2, 0.1, 0.0), Vec3f(1.0, 0.8, 0.02),   10.);
-            //material = Material(1.5, Vec4f(0.3,  1.5, 0.2, 0.5), Vec3f(.24, .21, .09),  125.);
+            material = Material(1.5, Vec4f(0.3,  1.5, 0.2, 0.5), Vec3f(.24, .21, .09),  125., 0.0);
         }
     }*/
 
@@ -349,7 +358,7 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
     Vec3f refract_part = refract_color * material.albedo[3];
 
     //float fog_intensity = fog_density * z_dist / 60;
-    float fog_intensity = fog_density * (1-exp(-z_dist/20));
+    float fog_intensity = fog_density * (1-exp(-z_dist/25));
     Vec3f fog_color(1.0, 1.0, 1.0);
     Vec3f object_color(diff_part + spec_part + reflect_part + refract_part);
     object_color[0] *= (1-fog_intensity);
@@ -375,16 +384,38 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
     const int height = 768;
     const int fov = M_PI/2;
     std::vector<Vec3f> framebuffer(width*height);
+    int num_samples = 4;
 
     #pragma omp parallel for
+    for (size_t j = 0; j<height; j++) {
+        for (size_t i = 0; i<width; i++) {
+            Vec3f color(0.0, 0.0, 0.0);
+            for (int i_sub = 0; i_sub < num_samples / 2; i_sub++) {
+                for (int j_sub = 0; j_sub < num_samples / 2; j_sub++) {
+                    float x_jitter = float(rand()) / RAND_MAX * 2.0 - 1;
+                    float y_jitter = float(rand()) / RAND_MAX * 2.0 - 1;
+                    float dir_x =  (i + x_jitter + 0.5) -  width/2.;
+                    float dir_y = -(j + y_jitter + 0.5) + height/2.;    // this flips the image at the same time
+                    float dir_z = -height/(2.*tan(fov/2.));
+                    color = color + cast_ray(Vec3f(0,0,3), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
+                }
+            }
+            color[0] = color[0] / num_samples;
+            color[1] = color[1] / num_samples;
+            color[2] = color[2] / num_samples;
+            framebuffer[i+j*width] = color;
+        }
+    }
+
+    /*#pragma omp parallel for
     for (size_t j = 0; j<height; j++) {
         for (size_t i = 0; i<width; i++) {
             float dir_x =  (i + 0.5) -  width/2.;
             float dir_y = -(j + 0.5) + height/2.;    // this flips the image at the same time
             float dir_z = -height/(2.*tan(fov/2.));
-            framebuffer[i+j*width] = cast_ray(Vec3f(0,0,5), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
+            framebuffer[i+j*width] = cast_ray(Vec3f(0,0,3), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
         }
-    }
+    }*/
 
     std::ofstream ofs;
     ofs.open("./out.ppm");
@@ -405,23 +436,26 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
 
 
 int main() {
-    Material      ivory(1.0, Vec4f(0.6,  0.3, 0.1, 0.0), Vec3f(0.4, 0.4, 0.3),   50.);
-    Material      glass(1.5, Vec4f(0.0,  0.5, 0.1, 0.8), Vec3f(0.6, 0.7, 0.8),  125.);
-    Material red(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.3, 0.1, 0.1),   10.);
-    Material     mirror(1.0, Vec4f(0.0, 10.0, 0.8, 0.0), Vec3f(1.0, 1.0, 1.0), 1425.);
-    Material ivory_wall(1.0, Vec4f(0.6,  0.3, 0.0, 0.0), Vec3f(0.94, 0.88, 0.69),   30.);
-    Material red_wall(1.0, Vec4f(0.6,  0.3, 0.0, 0.0), Vec3f(0.97, 0.08, 0.29),   30.);
+    Material ivory(1.0, Vec4f(0.6,  0.3, 0.1, 0.0), Vec3f(0.4, 0.4, 0.3), 50., 0.0);
+    Material glass(1.5, Vec4f(0.0,  0.5, 0.1, 0.8), Vec3f(0.6, 0.7, 0.8), 125., 0.0);
+    Material glass_bump(1.5, Vec4f(0.0,  0.5, 0.1, 0.8), Vec3f(0.6, 0.7, 0.8), 125., 0.02);
+    Material red(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.62, 0.07, 0.06), 10., 0.2);
+    //Material red(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.3, 0.1, 0.1), 10., 0.0);
+    Material mirror(1.0, Vec4f(0.0, 10.0, 0.8, 0.0), Vec3f(1.0, 1.0, 1.0), 1425., 0.0);
+    Material orange(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.53, 0.25, 0.03), 10., 0.1);
+    Material purple(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.25, 0.02, 0.46), 10., 0.1);
+    //Material green(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.02, 0.47, 0.05), 10., 0.2);
     std::vector<Sphere> spheres;
-    //spheres.push_back(Sphere(Vec3f(-3, 0, -16), 2, ivory));
-    spheres.push_back(Sphere(Vec3f(-1, -1.5, -12), 2, glass));
-    spheres.push_back(Sphere(Vec3f(1.5, -0.5, -30), 2, red));
+    /*spheres.push_back(Sphere(Vec3f(-3, 0, -16), 2, orange));
+    spheres.push_back(Sphere(Vec3f(-1, -1.5, -12), 2, glass_bump));
+    spheres.push_back(Sphere(Vec3f(1.5, -2.0, -30), 2, red));
     spheres.push_back(Sphere(Vec3f(7, 5, -18), 4, mirror));
-    //spheres.push_back(Sphere(Vec3f(0, -1028, 0), 1000, ivory_wall));
-    //spheres.push_back(Sphere(Vec3f(-1010, 0, 0), 1000, red_wall));
-    //Vec3f li(-4, -1.5, -12);
-    //spheres.push_back(Sphere(li, 0.1, glass));
-
-    //spheres.push_back(Sphere(Vec3f(0, 0, -1000), 900, black));
+    spheres.push_back(Sphere(Vec3f(7, -2.5, -14), 1.5, glass));*/
+    spheres.push_back(Sphere(Vec3f(1, -1.5, -15), 4, mirror));
+    spheres.push_back(Sphere(Vec3f(-1, -4.3, -9.5), 1.2, orange));
+    spheres.push_back(Sphere(Vec3f(6, -4, -12), 1.5, glass_bump));
+    spheres.push_back(Sphere(Vec3f(1.5, -4.75, -7.5), 0.75, glass));
+    //spheres.push_back(Sphere(Vec3f(5, -2.5, -5), 3, purple));
     std::vector<Light> lights;
     lights.push_back(Light(Vec3f(-20, 20, 20), 1.5));
     lights.push_back(Light(Vec3f(30, 50, -25), 1.8));
