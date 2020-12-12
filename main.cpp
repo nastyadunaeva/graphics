@@ -8,7 +8,7 @@
 #include "geometry.h"
 #include "model.h"
 
-float fog_density = 0.93;
+float fog_density = 0.01;
 Model::Model(const char *filename) : verts(), faces() {
     std::ifstream in;
     in.open (filename, std::ifstream::in);
@@ -25,7 +25,8 @@ Model::Model(const char *filename) : verts(), faces() {
             iss >> trash;
             Vec3f v;
             for (int i=0;i<3;i++) iss >> v[i];
-            Vec3f off(-14, 0, -8.5);
+            //Vec3f off(-14, 0, -8.5);
+            Vec3f off(0., 0., 2.);
             v = v + off;
             verts.push_back(v);
         } else if (!line.compare(0, 2, "f ")) {
@@ -116,8 +117,8 @@ std::ostream& operator<<(std::ostream& out, Model &m) {
 
 
 Model duck("/home/nastya/graphics/test/duck.obj");
-//Model triangle("/home/nastya/graphics/test/triangle.obj");
-Model triangle("/home/nastya/graphics/test/lowpolytree.obj");
+Model triangle("/home/nastya/graphics/test/triangle.obj");
+//Model triangle("/home/nastya/graphics/test/lowpolytree.obj");
 
 
 class Light {
@@ -216,10 +217,9 @@ public:
 };
 
 bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &spheres,
-                     Vec3f &hit, Vec3f &N, Material &material, int &num) {
+                     Vec3f &hit, Vec3f &N, Material &material) {
     float spheres_dist = std::numeric_limits<float>::max();
     std::vector<Sphere>::const_iterator q = spheres.begin();
-    int i = 1;
     while (q != spheres.end()) {
         float dist_iter;
         if ((*q).ray_intersect(orig, dir, dist_iter) && dist_iter < spheres_dist) {
@@ -235,10 +235,8 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
                 Vec3f bias(random_bias_x, random_bias_y, random_bias_z);
                 N = (N + bias).normalize();
             }
-            num = i;
         }
         ++q;
-        i++;
     }
     //return spheres_dist < 1000;
 
@@ -262,8 +260,8 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
             //material = Material(1.0, Vec4f(0.6,  0.3, 0.1, 0.0), Vec3f(0.4, 0.4, 0.3),   50.);
         }
     }
-    /*float triangles_dist = std::numeric_limits<float>::max();
-    for (int i = 0; i < triangle.nfaces(); i++) {
+    float triangles_dist = std::numeric_limits<float>::max();
+    /*for (int i = 0; i < triangle.nfaces(); i++) {
         float dist_iter;
         if (triangle.ray_triangle_intersect(i, orig, dir, dist_iter) && dist_iter < triangles_dist && dist_iter < spheres_dist) {
             triangles_dist = dist_iter;
@@ -273,10 +271,10 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
             Vec3f v2 = triangle.point(triangle.vert(i, 2));
             N = cross(v1-v0, v2-v0).normalize();
             //material = Material(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.3, 0.1, 0.1),   10.);
-            material = Material(1.0, Vec4f(0.9,  0.1, 0.0, 0.0), Vec3f(0.3, 0.1, 0.1),   10.);
+            material = Material(1.0, Vec4f(0.0, 10.0, 0.8, 0.0), Vec3f(1.0, 1.0, 1.0), 1000., 0.0);
         }
     }*/
-    float triangles_dist = std::numeric_limits<float>::max();
+    //float triangles_dist = std::numeric_limits<float>::max();
     /*for (int i = 0; i < duck.nfaces(); i++) {
         float dist_iter;
         if (duck.ray_triangle_intersect(i, orig, dir, dist_iter) && dist_iter < triangles_dist && dist_iter < spheres_dist) {
@@ -308,8 +306,7 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
 Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &spheres, const std::vector<Light> &lights, size_t depth=0) {
     Vec3f point, N;
     Material material;
-    int num = 0;
-    if (depth > 4 || !scene_intersect(orig, dir, spheres, point, N, material, num)) { //глубину рекурсии задаем здесь
+    if (depth > 4 || !scene_intersect(orig, dir, spheres, point, N, material)) { //глубину рекурсии задаем здесь
         return Vec3f(0.98, 0.98, 0.98);
         //return Vec3f(0.12, 0.11, 0.37); // цвет фона
         //return Vec3f(0.1, 0.1, 0.1); // цвет фона
@@ -342,7 +339,7 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
         else {shadow_orig = shadow_orig + N*1e-3;} //немного сдвигаем точку в направлении нормали, чтобы не попасть туда же
         Vec3f shadow_pt, shadow_N;
         Material tmp;
-        if (scene_intersect(shadow_orig, light_dir, spheres, shadow_pt, shadow_N, tmp, num) && (shadow_pt-shadow_orig).norm() < light_dist) {
+        if (scene_intersect(shadow_orig, light_dir, spheres, shadow_pt, shadow_N, tmp) && (shadow_pt-shadow_orig).norm() < light_dist) {
             ++q;
             continue; //если луч точка-источник пересекает объекты сцены, то игнорируем источник
         }
@@ -384,14 +381,16 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
     const int height = 768;
     const int fov = M_PI/2;
     std::vector<Vec3f> framebuffer(width*height);
-    int num_samples = 4;
 
-    #pragma omp parallel for
+    int n1 = 2, n2 = 2;
+    int num_samples = n1 * n2;
+
+    /*#pragma omp parallel for
     for (size_t j = 0; j<height; j++) {
         for (size_t i = 0; i<width; i++) {
             Vec3f color(0.0, 0.0, 0.0);
-            for (int i_sub = 0; i_sub < num_samples / 2; i_sub++) {
-                for (int j_sub = 0; j_sub < num_samples / 2; j_sub++) {
+            for (int i_sub = 0; i_sub < n1; i_sub++) {
+                for (int j_sub = 0; j_sub < n2; j_sub++) {
                     float x_jitter = float(rand()) / RAND_MAX * 2.0 - 1;
                     float y_jitter = float(rand()) / RAND_MAX * 2.0 - 1;
                     float dir_x =  (i + x_jitter + 0.5) -  width/2.;
@@ -405,9 +404,9 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
             color[2] = color[2] / num_samples;
             framebuffer[i+j*width] = color;
         }
-    }
+    }*/
 
-    /*#pragma omp parallel for
+    #pragma omp parallel for
     for (size_t j = 0; j<height; j++) {
         for (size_t i = 0; i<width; i++) {
             float dir_x =  (i + 0.5) -  width/2.;
@@ -415,7 +414,7 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
             float dir_z = -height/(2.*tan(fov/2.));
             framebuffer[i+j*width] = cast_ray(Vec3f(0,0,3), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
         }
-    }*/
+    }
 
     std::ofstream ofs;
     ofs.open("./out.ppm");
@@ -454,7 +453,7 @@ int main() {
     spheres.push_back(Sphere(Vec3f(1, -1.5, -15), 4, mirror));
     spheres.push_back(Sphere(Vec3f(-1, -4.3, -9.5), 1.2, orange));
     spheres.push_back(Sphere(Vec3f(6, -4, -12), 1.5, glass_bump));
-    spheres.push_back(Sphere(Vec3f(1.5, -4.75, -7.5), 0.75, glass));
+    spheres.push_back(Sphere(Vec3f(1.0, -4.75, -7.7), 0.75, glass));
     //spheres.push_back(Sphere(Vec3f(5, -2.5, -5), 3, purple));
     std::vector<Light> lights;
     lights.push_back(Light(Vec3f(-20, 20, 20), 1.5));
