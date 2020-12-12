@@ -8,7 +8,9 @@
 #include "geometry.h"
 #include "model.h"
 
-float fog_density = 0.01;
+float fog_density = 0.93;
+int n1 = 2, n2 = 2;
+int num_samples = n1 * n2;
 Model::Model(const char *filename) : verts(), faces() {
     std::ifstream in;
     in.open (filename, std::ifstream::in);
@@ -26,7 +28,7 @@ Model::Model(const char *filename) : verts(), faces() {
             Vec3f v;
             for (int i=0;i<3;i++) iss >> v[i];
             //Vec3f off(-14, 0, -8.5);
-            Vec3f off(0., 0., 2.);
+            Vec3f off(2., 0., -1.);
             v = v + off;
             verts.push_back(v);
         } else if (!line.compare(0, 2, "f ")) {
@@ -125,7 +127,8 @@ class Light {
 public:
     Vec3f position;
     float intensity;
-    Light(const Vec3f &pos, const float in): position(pos), intensity(in) {};
+    float radius;
+    Light(const Vec3f &pos, const float in, const float rad): position(pos), intensity(in), radius(rad) {};
 };
 
 class Material {
@@ -332,8 +335,18 @@ Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &s
     float specular_light_intensity = 0;
     std::vector<Light>::const_iterator q = lights.begin();
     while (q != lights.end()) {
-        Vec3f light_dir = ((*q).position - point).normalize();
-        float light_dist = ((*q).position - point).norm(); //расстояние от точки до света
+        Vec3f random_light_pos = (*q).position;
+        if ((*q).radius > 1e-3) {
+            float t = float(rand()) / float(RAND_MAX) * 2 * M_PI;
+            float z = float(rand()) / float(RAND_MAX) * 2 * (*q).radius - (*q).radius;
+            float r = sqrt((*q).radius - z*z);
+            random_light_pos[0] = random_light_pos[0] + r * cos(t);
+            random_light_pos[1] = random_light_pos[1] + r * sin(t);
+            random_light_pos[2] = random_light_pos[2] + z;
+        }
+
+        Vec3f light_dir = (random_light_pos - point).normalize();
+        float light_dist = (random_light_pos - point).norm(); //расстояние от точки до света
         Vec3f shadow_orig = point;
         if (light_dir*N < 0) {shadow_orig = shadow_orig - N*1e-3;} // проверяем лежит ли точка в тени источника
         else {shadow_orig = shadow_orig + N*1e-3;} //немного сдвигаем точку в направлении нормали, чтобы не попасть туда же
@@ -382,17 +395,14 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
     const int fov = M_PI/2;
     std::vector<Vec3f> framebuffer(width*height);
 
-    int n1 = 2, n2 = 2;
-    int num_samples = n1 * n2;
-
-    /*#pragma omp parallel for
+    #pragma omp parallel for
     for (size_t j = 0; j<height; j++) {
         for (size_t i = 0; i<width; i++) {
             Vec3f color(0.0, 0.0, 0.0);
             for (int i_sub = 0; i_sub < n1; i_sub++) {
                 for (int j_sub = 0; j_sub < n2; j_sub++) {
-                    float x_jitter = float(rand()) / RAND_MAX * 2.0 - 1;
-                    float y_jitter = float(rand()) / RAND_MAX * 2.0 - 1;
+                    float x_jitter = float(rand()) / RAND_MAX  - 0.5;
+                    float y_jitter = float(rand()) / RAND_MAX - 0.5;
                     float dir_x =  (i + x_jitter + 0.5) -  width/2.;
                     float dir_y = -(j + y_jitter + 0.5) + height/2.;    // this flips the image at the same time
                     float dir_z = -height/(2.*tan(fov/2.));
@@ -404,9 +414,9 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
             color[2] = color[2] / num_samples;
             framebuffer[i+j*width] = color;
         }
-    }*/
+    }
 
-    #pragma omp parallel for
+    /*#pragma omp parallel for
     for (size_t j = 0; j<height; j++) {
         for (size_t i = 0; i<width; i++) {
             float dir_x =  (i + 0.5) -  width/2.;
@@ -414,7 +424,7 @@ void render(const std::vector<Sphere> &spheres, const std::vector<Light> &lights
             float dir_z = -height/(2.*tan(fov/2.));
             framebuffer[i+j*width] = cast_ray(Vec3f(0,0,3), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
         }
-    }
+    }*/
 
     std::ofstream ofs;
     ofs.open("./out.ppm");
@@ -454,12 +464,13 @@ int main() {
     spheres.push_back(Sphere(Vec3f(-1, -4.3, -9.5), 1.2, orange));
     spheres.push_back(Sphere(Vec3f(6, -4, -12), 1.5, glass_bump));
     spheres.push_back(Sphere(Vec3f(1.0, -4.75, -7.7), 0.75, glass));
+    //spheres.push_back(Sphere(Vec3f(3, -5.4, -7.7), 0.1, glass));
     //spheres.push_back(Sphere(Vec3f(5, -2.5, -5), 3, purple));
     std::vector<Light> lights;
-    lights.push_back(Light(Vec3f(-20, 20, 20), 1.5));
-    lights.push_back(Light(Vec3f(30, 50, -25), 1.8));
-    lights.push_back(Light(Vec3f(30, 20, 30), 1.7));
-    //lights.push_back(Light(Vec3f(0, 0, 0), 2));
+    lights.push_back(Light(Vec3f(-20, 20, 20), 1.5, 1.0));
+    lights.push_back(Light(Vec3f(30, 50, -25), 1.8, 1.0));
+    lights.push_back(Light(Vec3f(30, 20, 30), 0.5, 1.0));
+    //lights.push_back(Light(Vec3f(3, -5.4, -7.7), 200.75, 0.0));
     render(spheres, lights);
     return 0;
 }
